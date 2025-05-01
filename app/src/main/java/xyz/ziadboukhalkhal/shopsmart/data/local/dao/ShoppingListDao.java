@@ -1,6 +1,5 @@
 package xyz.ziadboukhalkhal.shopsmart.data.local.dao;
 
-
 import androidx.lifecycle.LiveData;
 import androidx.room.Dao;
 import androidx.room.Delete;
@@ -9,14 +8,13 @@ import androidx.room.OnConflictStrategy;
 import androidx.room.Query;
 import androidx.room.Update;
 
-
 import java.util.List;
 
 import xyz.ziadboukhalkhal.shopsmart.data.local.entity.ShoppingListItem;
 
 @Dao
 public interface ShoppingListDao {
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     void insert(ShoppingListItem item);
 
     @Update
@@ -43,17 +41,16 @@ public interface ShoppingListDao {
     @Query("SELECT * FROM shopping_items WHERE name LIKE :query OR notes LIKE :query ORDER BY timestamp DESC")
     LiveData<List<ShoppingListItem>> searchItems(String query);
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    void insertAll(List<ShoppingListItem> items); //for cloud sync
+    @Query("SELECT * FROM shopping_items WHERE lastUpdated > lastSynced")
+    List<ShoppingListItem> getUnsyncedItems();
 
+    @Query("UPDATE shopping_items SET lastSynced = :syncTime WHERE id = :id")
+    void markAsSynced(int id, long syncTime);
+
+    @Query("SELECT * FROM shopping_items WHERE id = :id")
+    ShoppingListItem getItemById(int id);
 
     @Query("SELECT * FROM shopping_items")
     List<ShoppingListItem> getAllItemsSync();
-
-    @Update
-    void updateAll(List<ShoppingListItem> items);
-
-    @Query("SELECT * FROM shopping_items WHERE lastUpdated > lastSynced OR lastSynced = 0")
-    List<ShoppingListItem> getItemsToSync(long minLastUpdated);
 
 }

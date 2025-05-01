@@ -1,6 +1,5 @@
 package xyz.ziadboukhalkhal.shopsmart.data.repository;
 
-
 import android.app.Application;
 import android.util.Log;
 
@@ -25,17 +24,13 @@ public class ShoppingListRepository {
     private ShoppingListDao shoppingListDao;
     private LiveData<List<ShoppingListItem>> allItems;
     private LiveData<List<ShoppingListItem>> unpurchasedItems;
+    private LiveData<List<String>> allCategories;
     private final ExecutorService executorService;
     private final FirebaseFirestore firestore = FirebaseFirestore.getInstance();
     private final String userId;
-
-
     private boolean isSyncing = false;
-    private long lastSyncTime = 0;
-    private static final long SYNC_COOLDOWN_MS = 30000; // 30 seconds between syncs
 
     public ShoppingListRepository(Application application) {
-
         ShoppingListDatabase database = ShoppingListDatabase.getInstance(application);
         shoppingListDao = database.shoppingListDao();
         allItems = shoppingListDao.getAllItems();
@@ -46,11 +41,17 @@ public class ShoppingListRepository {
                 FirebaseAuth.getInstance().getCurrentUser().getUid() : "";
     }
 
+    // Basic CRUD operations
     public void insert(ShoppingListItem item) {
+        if (!item.isValid()) {
+            return;  // Don't insert invalid items
+        }
+        item.setLastUpdated(System.currentTimeMillis());
         executorService.execute(() -> shoppingListDao.insert(item));
     }
 
     public void update(ShoppingListItem item) {
+        item.setLastUpdated(System.currentTimeMillis());
         executorService.execute(() -> shoppingListDao.update(item));
     }
 
@@ -62,6 +63,7 @@ public class ShoppingListRepository {
         executorService.execute(shoppingListDao::deleteAllItems);
     }
 
+    // LiveData getters
     public LiveData<List<ShoppingListItem>> getAllItems() {
         return allItems;
     }
@@ -70,10 +72,6 @@ public class ShoppingListRepository {
         return unpurchasedItems;
     }
 
-
-    private LiveData<List<String>> allCategories;
-
-    // Add new method
     public LiveData<List<String>> getAllCategories() {
         return allCategories;
     }
@@ -87,88 +85,87 @@ public class ShoppingListRepository {
         return shoppingListDao.searchItems(searchQuery);
     }
 
-
+    // Sync methods
     public void syncWithCloud() {
-        if (isSyncing || System.currentTimeMillis() - lastSyncTime < SYNC_COOLDOWN_MS) {
-            return;
-        }
-
+        if (isSyncing) return;
         isSyncing = true;
-        lastSyncTime = System.currentTimeMillis();
 
-        // 1. First pull from cloud
-        firestore.collection("users/"+userId+"/items").get()
-                .addOnSuccessListener(cloudSnapshot -> {
-                    List<ShoppingListItem> cloudItems = new ArrayList<>();
+        executorService.execute(() -> {
+            try {
+                // 1. Push local changes to Firestore
+                List<ShoppingListItem> unsyncedItems = shoppingListDao.getUnsyncedItems();
+                if (!unsyncedItems.isEmpty()) {
+                    pushToCloud(unsyncedItems);
+                }
 
-                    for (DocumentSnapshot doc : cloudSnapshot.getDocuments()) {
-                        ShoppingListItem item = doc.toObject(ShoppingListItem.class);
-                        if (item != null) {
-                            item.setLastSynced(System.currentTimeMillis());
-                            cloudItems.add(item);
-                        }
-                    }
-                    final long currentTime = System.currentTimeMillis() ;
-                    // 2. Merge with local data
-                    executorService.execute(() -> {
-                        List<ShoppingListItem> localItems = shoppingListDao.getItemsToSync(currentTime - SYNC_COOLDOWN_MS);
-                        Map<String, ShoppingListItem> mergedItems = new HashMap<>();
-
-                        // Add all cloud items
-                        for (ShoppingListItem cloudItem : cloudItems) {
-                            mergedItems.put(cloudItem.getId()+"", cloudItem);
-                        }
-
-                        // Add local items if newer or not in cloud
-                        for (ShoppingListItem localItem : localItems) {
-                            ShoppingListItem cloudVersion = mergedItems.get(localItem.getId()+"");
-                            if (cloudVersion == null || localItem.getLastUpdated() > cloudVersion.getLastUpdated()) {
-                                mergedItems.put(localItem.getId()+"", localItem);
-                            }
-                        }
-
-                        // 3. Save merged data
-                        shoppingListDao.deleteAllItems();
-                        shoppingListDao.insertAll(new ArrayList<>(mergedItems.values()));
-
-                        // 4. Push final merged data to cloud
-                        pushToCloud(new ArrayList<>(mergedItems.values()));
-                    });
-                })
-                .addOnFailureListener(e -> {
-                    Log.e("Sync", "Pull failed", e);
-                    isSyncing = false;
-                });
+                // 2. Pull from Firestore
+                pullFromCloud();
+            } catch (Exception e) {
+                Log.e("Sync", "Error during sync", e);
+            } finally {
+                isSyncing = false;
+            }
+        });
     }
 
     private void pushToCloud(List<ShoppingListItem> items) {
-        Map<String, Object> updates = new HashMap<>();
-        List<Map<String, Object>> itemMaps = new ArrayList<>();
+        long syncTime = System.currentTimeMillis();
 
         for (ShoppingListItem item : items) {
-            Map<String, Object> itemMap = new HashMap<>();
-            itemMap.put("id", item.getId());
-            itemMap.put("name", item.getName());
-            itemMap.put("quantity", item.getQuantity());
-            itemMap.put("imagePath", item.getImagePath());
-            itemMap.put("purchased", item.isPurchased());
-            itemMap.put("timestamp", item.getTimestamp());
-            itemMap.put("category", item.getCategory());
-            itemMap.put("notes", item.getNotes());
-            itemMap.put("lastUpdated", item.getLastUpdated());
-            itemMap.put("lastSynced", System.currentTimeMillis());
-            itemMaps.add(itemMap);
+            Map<String, Object> itemData = new HashMap<>();
+            itemData.put("id", item.getId());
+            itemData.put("name", item.getName());
+            itemData.put("quantity", item.getQuantity());
+            itemData.put("category", item.getCategory());
+            itemData.put("notes", item.getNotes());
+            itemData.put("imagePath", item.getImagePath());
+            itemData.put("purchased", item.isPurchased());
+            itemData.put("timestamp", item.getTimestamp());
+            itemData.put("lastUpdated", item.getLastUpdated());
+
+            firestore.collection("users").document(userId)
+                    .collection("items").document(String.valueOf(item.getId()))
+                    .set(itemData)
+                    .addOnSuccessListener(aVoid -> {
+                        executorService.execute(() -> {
+                            shoppingListDao.markAsSynced(item.getId(), syncTime);
+                        });
+                    })
+                    .addOnFailureListener(e -> {
+                        Log.e("Sync", "Error syncing item " + item.getId(), e);
+                    });
         }
+    }
 
-        updates.put("items", itemMaps);
+    private void pullFromCloud() {
+        firestore.collection("users").document(userId)
+                .collection("items").get()
+                .addOnSuccessListener(querySnapshot -> {
+                    List<ShoppingListItem> validItems = new ArrayList<>();
+                    long syncTime = System.currentTimeMillis();
 
-        firestore.collection("users/"+userId+"/items")
-                .document("bulk")
-                .set(updates)
-                .addOnSuccessListener(aVoid -> isSyncing = false)
-                .addOnFailureListener(e -> {
-                    Log.e("Sync", "Push failed", e);
-                    isSyncing = false;
+                    for (DocumentSnapshot doc : querySnapshot.getDocuments()) {
+                        ShoppingListItem item = doc.toObject(ShoppingListItem.class);
+                        if (item != null && item.isValid()) {  // Check validity
+                            item.setLastSynced(syncTime);
+                            validItems.add(item);
+                        }
+                    }
+
+                    executorService.execute(() -> {
+                        for (ShoppingListItem cloudItem : validItems) {
+                            ShoppingListItem localItem = shoppingListDao.getItemById(cloudItem.getId());
+
+                            if (localItem == null) {
+                                shoppingListDao.insert(cloudItem);
+                            } else if (cloudItem.getLastUpdated() > localItem.getLastUpdated()) {
+                                shoppingListDao.update(cloudItem);
+                            }
+                        }
+                    });
+                }).addOnFailureListener(e -> {
+                    Log.e("Sync", "Error fetching cloud data", e);
                 });
+
     }
 }

@@ -16,7 +16,7 @@ import xyz.ziadboukhalkhal.shopsmart.data.local.entity.ShoppingListItem;
 
 @Dao
 public interface ShoppingListDao {
-    @Insert
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
     void insert(ShoppingListItem item);
 
     @Update
@@ -25,13 +25,19 @@ public interface ShoppingListDao {
     @Delete
     void delete(ShoppingListItem item);
 
+    @Query("DELETE FROM shopping_items WHERE id = :id")
+    void delete(String id);
+
     @Query("DELETE FROM shopping_items")
     void deleteAllItems();
 
-    @Query("SELECT * FROM shopping_items ORDER BY timestamp DESC")
-    LiveData<List<ShoppingListItem>> getAllItems();
+    @@Query("SELECT * FROM shopping_items WHERE userId = :userId ORDER BY localTimestamp DESC")
+    LiveData<List<ShoppingListItem>> getAllItems(String userId);
 
-    @Query("SELECT * FROM shopping_items WHERE purchased = 0 ORDER BY timestamp DESC")
+    @Query("SELECT * FROM shopping_items WHERE isSynced = 0 AND userId = :userId")
+    List<ShoppingListItem> getUnsyncedItems(String userId);
+
+    @Query("SELECT * FROM shopping_items WHERE purchased = 0 ORDER BY localTimestamp DESC")
     LiveData<List<ShoppingListItem>> getUnpurchasedItems();
 
     @Query("SELECT DISTINCT category FROM shopping_items WHERE category IS NOT NULL AND category != ''")

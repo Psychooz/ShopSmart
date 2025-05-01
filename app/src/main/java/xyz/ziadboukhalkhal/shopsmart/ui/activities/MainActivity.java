@@ -1,10 +1,13 @@
 package xyz.ziadboukhalkhal.shopsmart.ui.activities;
 
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
+import androidx.appcompat.widget.SearchView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
@@ -19,8 +22,12 @@ import androidx.work.ExistingPeriodicWorkPolicy;
 import androidx.work.PeriodicWorkRequest;
 import androidx.work.WorkManager;
 
+import com.google.android.material.chip.Chip;
+import com.google.android.material.chip.ChipGroup;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.android.material.snackbar.Snackbar;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
 
 import java.util.concurrent.TimeUnit;
 
@@ -36,10 +43,17 @@ public class MainActivity extends AppCompatActivity {
 
     private ShoppingListViewModel viewModel;
     private ShoppingListAdapter adapter;
+    private ChipGroup chipGroup; //categorie filtering
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        try {
+            FirebaseApp.initializeApp(this);
+        } catch (Exception e) {
+            Log.e("FirebaseInit", "Firebase initialization failed", e);
+        }
+
         setContentView(R.layout.activity_main);
 
         Toolbar toolbar = findViewById(R.id.toolbar);
@@ -59,7 +73,16 @@ public class MainActivity extends AppCompatActivity {
         recyclerView.setAdapter(adapter);
 
         viewModel = new ViewModelProvider(this).get(ShoppingListViewModel.class);
+        if (FirebaseAuth.getInstance().getCurrentUser() == null) {
+            startActivity(new Intent(this, LoginActivity.class));
+            finish();
+        } else {
+            viewModel.syncWithCloud();
+        }
         viewModel.getAllItems().observe(this, items -> adapter.submitList(items));
+
+        chipGroup = findViewById(R.id.chipGroup);
+        setupCategoryFilter();
 
         // Swipe to delete
         new ItemTouchHelper(new ItemTouchHelper.SimpleCallback(0,
@@ -95,6 +118,35 @@ public class MainActivity extends AppCompatActivity {
             item.setPurchased(isChecked);
             viewModel.update(item);
         });
+        scheduleNotification();
+
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        if (shouldSync()) {
+            viewModel.syncWithCloud();
+        }
+    }
+
+    private boolean shouldSync() {
+        SharedPreferences prefs = getSharedPreferences("sync_prefs", MODE_PRIVATE);
+        long lastSync = prefs.getLong("last_sync", 0);
+        return System.currentTimeMillis() - lastSync > TimeUnit.HOURS.toMillis(1);
+    }
+    private void scheduleNotification() {
+        PeriodicWorkRequest reminderWorkRequest =
+                new PeriodicWorkRequest.Builder(ShoppingReminderWorker.class, 10, TimeUnit.SECONDS)
+                        .build();
+
+        // Planifier la tâche périodique
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "SHOPPING_REMINDER_WORK",
+                ExistingPeriodicWorkPolicy.KEEP,
+                reminderWorkRequest
+        );
+
     }
 
     @Override
@@ -106,8 +158,12 @@ public class MainActivity extends AppCompatActivity {
             int quantity = data.getIntExtra(AddEditItemActivity.EXTRA_QUANTITY, 1);
             String imagePath = data.getStringExtra(AddEditItemActivity.EXTRA_IMAGE_PATH);
 
+            String category = data.getStringExtra(AddEditItemActivity.EXTRA_CATEGORY);
+            String notes = data.getStringExtra(AddEditItemActivity.EXTRA_NOTES);
+
+
             if (requestCode == ADD_ITEM_REQUEST) {
-                ShoppingListItem item = new ShoppingListItem(name, quantity, imagePath);
+                ShoppingListItem item = new ShoppingListItem(name, quantity, imagePath, category, notes);
                 viewModel.insert(item);
                 Toast.makeText(this, "Item saved", Toast.LENGTH_SHORT).show();
             } else if (requestCode == EDIT_ITEM_REQUEST) {
@@ -117,7 +173,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                ShoppingListItem item = new ShoppingListItem(name, quantity, imagePath);
+                ShoppingListItem item = new ShoppingListItem(name, quantity, imagePath, category, notes);
                 item.setId(id);
                 item.setPurchased(false);
                 viewModel.update(item);
@@ -131,6 +187,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         getMenuInflater().inflate(R.menu.menu_main, menu);
+        setupSearchView(menu);
         return true;
     }
 
@@ -145,19 +202,65 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    private void scheduleNotification() {
-        // Créer une tâche périodique qui se répète toutes les 24 heures
-        PeriodicWorkRequest reminderWorkRequest =
-                new PeriodicWorkRequest.Builder(ShoppingReminderWorker.class, 1, TimeUnit.HOURS)
-                        .build();
+    private void setupSearchView(Menu menu) {
+        MenuItem searchItem = menu.findItem(R.id.action_search);
+        SearchView searchView = (SearchView) searchItem.getActionView();
+        searchView.setQueryHint("Search items or notes...");
+        searchView.setOnQueryTextListener(new SearchView.OnQueryTextListener() {
+            @Override
+            public boolean onQueryTextSubmit(String query) {
+                return false;
+            }
 
-        // Planifier la tâche périodique
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-                "SHOPPING_REMINDER_WORK",
-                ExistingPeriodicWorkPolicy.KEEP,
-                reminderWorkRequest
-        );
-
+            @Override
+            public boolean onQueryTextChange(String newText) {
+                if (newText.isEmpty()) {
+                    // Show all items when search is empty
+                    viewModel.getAllItems().observe(MainActivity.this, items ->
+                            adapter.submitList(items));
+                } else {
+                    // Perform search
+                    viewModel.searchItems(newText).observe(MainActivity.this, items ->
+                            adapter.submitList(items));
+                }
+                return true;
+            }
+        });
     }
+
+    private void setupCategoryFilter() {
+        viewModel.getAllCategories().observe(this, categories -> {
+            chipGroup.removeViews(1, chipGroup.getChildCount() - 1); // Keep "All" chip
+
+            // Add a chip for each category
+            for (String category : categories) {
+                Chip chip = new Chip(this);
+                chip.setText(category);
+                chip.setCheckable(true);
+                chipGroup.addView(chip);
+            }
+
+            chipGroup.setOnCheckedStateChangeListener((group, checkedIds) -> {
+                if (checkedIds.isEmpty()) {
+                    // Show all items if nothing is selected
+                    viewModel.getAllItems().observe(this, items ->
+                            adapter.submitList(items));
+                } else {
+                    Chip selectedChip = group.findViewById(checkedIds.get(0));
+                    String selectedCategory = selectedChip.getId() == R.id.chip_all ? null : selectedChip.getText().toString();
+
+                    if (selectedCategory == null) {
+                        viewModel.getAllItems().observe(this, items ->
+                                adapter.submitList(items));
+                    } else {
+                        viewModel.getItemsByCategory(selectedCategory).observe(this, items ->
+                                adapter.submitList(items));
+                    }
+                }
+            });
+        });
+    }
+
+
 
 }

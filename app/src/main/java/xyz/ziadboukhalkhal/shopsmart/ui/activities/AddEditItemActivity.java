@@ -39,6 +39,8 @@ public class AddEditItemActivity extends AppCompatActivity {
     public static final String EXTRA_QUANTITY = "xyz.ziadboukhalkhal.shopsmart.EXTRA_QUANTITY";
     public static final String EXTRA_IMAGE_PATH = "xyz.ziadboukhalkhal.shopsmart.EXTRA_IMAGE_PATH";
 
+    public static final String EXTRA_CATEGORY = "xyz.ziadboukhalkhal.shopsmart.EXTRA_CATEGORY";
+    public static final String EXTRA_NOTES = "xyz.ziadboukhalkhal.shopsmart.EXTRA_NOTES";
     private static final int REQUEST_IMAGE_CAPTURE = 1;
     private static final int REQUEST_PICK_IMAGE = 2;
     private static final int REQUEST_CAMERA_PERMISSION = 101;
@@ -46,6 +48,8 @@ public class AddEditItemActivity extends AppCompatActivity {
 
     private TextInputEditText editTextName;
     private TextInputEditText editTextQuantity;
+    private TextInputEditText editTextCategory;
+    private TextInputEditText editTextNotes;
     private ImageView imagePreview;
     private Button buttonTakePhoto;
     private Button buttonSelectImage;
@@ -66,6 +70,8 @@ public class AddEditItemActivity extends AppCompatActivity {
         buttonTakePhoto = findViewById(R.id.button_take_photo);
         buttonSelectImage = findViewById(R.id.button_select_image);
         buttonSave = findViewById(R.id.button_save);
+        editTextCategory = findViewById(R.id.edit_category);
+        editTextNotes = findViewById(R.id.edit_notes);
 
         Objects.requireNonNull(getSupportActionBar()).setHomeAsUpIndicator(R.drawable.ic_close);
 
@@ -74,6 +80,8 @@ public class AddEditItemActivity extends AppCompatActivity {
             setTitle("Edit Item");
             editTextName.setText(intent.getStringExtra(EXTRA_NAME));
             editTextQuantity.setText(String.valueOf(intent.getIntExtra(EXTRA_QUANTITY, 1)));
+            editTextCategory.setText(intent.getStringExtra(EXTRA_CATEGORY));
+            editTextNotes.setText(intent.getStringExtra(EXTRA_NOTES));
             selectedImagePath = intent.getStringExtra(EXTRA_IMAGE_PATH);
 
             if (selectedImagePath != null && !selectedImagePath.isEmpty()) {
@@ -111,6 +119,8 @@ public class AddEditItemActivity extends AppCompatActivity {
     private void saveItem() {
         String name = editTextName.getText().toString().trim();
         String quantityStr = editTextQuantity.getText().toString().trim();
+        String category = editTextCategory.getText().toString().trim();
+        String notes = editTextNotes.getText().toString().trim();
 
         if (name.isEmpty()) {
             editTextName.setError("Name cannot be empty");
@@ -127,6 +137,8 @@ public class AddEditItemActivity extends AppCompatActivity {
         Intent data = new Intent();
         data.putExtra(EXTRA_NAME, name);
         data.putExtra(EXTRA_QUANTITY, quantity);
+        data.putExtra(EXTRA_CATEGORY, category);
+        data.putExtra(EXTRA_NOTES, notes);
 
         // Use the most recent image path
         String imagePath = currentPhotoPath != null ? currentPhotoPath : selectedImagePath;

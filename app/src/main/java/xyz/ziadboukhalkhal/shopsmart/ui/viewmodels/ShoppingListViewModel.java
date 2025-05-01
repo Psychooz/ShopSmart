@@ -16,11 +16,18 @@ public class ShoppingListViewModel extends AndroidViewModel {
     private LiveData<List<ShoppingListItem>> allItems;
     private LiveData<List<ShoppingListItem>> unpurchasedItems;
 
+    private LiveData<List<String>> allCategories;
+    private LiveData<List<ShoppingListItem>> itemsByCategory;
+
+    private LiveData<List<ShoppingListItem>> searchResults;
+
+
     public ShoppingListViewModel(@NonNull Application application) {
         super(application);
         repository = new ShoppingListRepository(application);
         allItems = repository.getAllItems();
         unpurchasedItems = repository.getUnpurchasedItems();
+        allCategories = repository.getAllCategories();
     }
 
     public void insert(ShoppingListItem item) {
@@ -45,5 +52,23 @@ public class ShoppingListViewModel extends AndroidViewModel {
 
     public LiveData<List<ShoppingListItem>> getUnpurchasedItems() {
         return unpurchasedItems;
+    }
+
+    public LiveData<List<String>> getAllCategories() {
+        return allCategories;
+    }
+
+    public LiveData<List<ShoppingListItem>> getItemsByCategory(String category) {
+        itemsByCategory = repository.getItemsByCategory(category);
+        return itemsByCategory;
+    }
+
+    public LiveData<List<ShoppingListItem>> searchItems(String query) {
+        searchResults = repository.searchItems(query);
+        return searchResults;
+    }
+
+    public void syncWithCloud(){
+        repository.syncWithCloud();
     }
 }

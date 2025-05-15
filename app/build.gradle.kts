@@ -46,9 +46,6 @@ dependencies {
     implementation("androidx.room:room-runtime:2.5.2")
     annotationProcessor("androidx.room:room-compiler:2.5.2")
 
-    // Retrofit pour l'API REST
-    implementation("com.squareup.retrofit2:retrofit:2.9.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
 
     // Glide pour la gestion des images
     implementation("com.github.bumptech.glide:glide:4.15.1")
@@ -56,4 +53,11 @@ dependencies {
 
     // WorkManager pour les notifications
     implementation("androidx.work:work-runtime:2.8.1")
+
+    //firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
 }
+apply(plugin = "com.google.gms.google-services")

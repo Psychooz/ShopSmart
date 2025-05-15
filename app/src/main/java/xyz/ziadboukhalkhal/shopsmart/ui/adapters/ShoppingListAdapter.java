@@ -57,7 +57,19 @@ public class ShoppingListAdapter extends ListAdapter<ShoppingListItem, ShoppingL
         ShoppingListItem currentItem = getItem(position);
         holder.textViewName.setText(currentItem.getName());
         holder.textViewQuantity.setText("Quantity: " + currentItem.getQuantity());
+//        holder.checkBoxPurchased.setChecked(currentItem.isPurchased());
+        holder.checkBoxPurchased.setOnCheckedChangeListener(null);
         holder.checkBoxPurchased.setChecked(currentItem.isPurchased());
+        holder.textViewCategory.setText(currentItem.getCategory());
+
+
+        // Only show notes if they exist
+        if (currentItem.getNotes() != null && !currentItem.getNotes().isEmpty()) {
+            holder.textViewNotes.setText(currentItem.getNotes());
+            holder.textViewNotes.setVisibility(View.VISIBLE);
+        } else {
+            holder.textViewNotes.setVisibility(View.GONE);
+        }
 
         // Load image with Glide
         if (currentItem.getImagePath() != null && !currentItem.getImagePath().isEmpty()) {
@@ -77,6 +89,7 @@ public class ShoppingListAdapter extends ListAdapter<ShoppingListItem, ShoppingL
 
         holder.checkBoxPurchased.setOnClickListener(v -> {
             if (checkedChangeListener != null && position != RecyclerView.NO_POSITION) {
+                currentItem.setPurchased(holder.checkBoxPurchased.isChecked());
                 checkedChangeListener.onItemCheckedChange(currentItem, holder.checkBoxPurchased.isChecked());
             }
         });
@@ -92,12 +105,17 @@ public class ShoppingListAdapter extends ListAdapter<ShoppingListItem, ShoppingL
         private CheckBox checkBoxPurchased;
         private ImageView imageViewItem;
 
+        private TextView textViewCategory;
+        private TextView textViewNotes;
+
         public ShoppingItemViewHolder(@NonNull View itemView) {
             super(itemView);
             textViewName = itemView.findViewById(R.id.text_name);
             textViewQuantity = itemView.findViewById(R.id.text_quantity);
             checkBoxPurchased = itemView.findViewById(R.id.checkbox_purchased);
             imageViewItem = itemView.findViewById(R.id.image_item);
+            textViewCategory = itemView.findViewById(R.id.text_category);
+            textViewNotes = itemView.findViewById(R.id.text_notes);
 
             itemView.setOnClickListener(v -> {
                 int position = getAdapterPosition();

@@ -95,6 +95,21 @@ public class MainActivity extends AppCompatActivity {
             item.setPurchased(isChecked);
             viewModel.update(item);
         });
+
+        scheduleNotification();
+    }
+    private void scheduleNotification() {
+        PeriodicWorkRequest reminderWorkRequest =
+                new PeriodicWorkRequest.Builder(ShoppingReminderWorker.class, 10, TimeUnit.SECONDS)
+                        .build();
+
+        // Planifier la tâche périodique
+        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
+                "SHOPPING_REMINDER_WORK",
+                ExistingPeriodicWorkPolicy.KEEP,
+                reminderWorkRequest
+        );
+
     }
 
     @Override
@@ -145,19 +160,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
 
-    private void scheduleNotification() {
-        // Créer une tâche périodique qui se répète toutes les 24 heures
-        PeriodicWorkRequest reminderWorkRequest =
-                new PeriodicWorkRequest.Builder(ShoppingReminderWorker.class, 1, TimeUnit.HOURS)
-                        .build();
 
-        // Planifier la tâche périodique
-        WorkManager.getInstance(this).enqueueUniquePeriodicWork(
-                "SHOPPING_REMINDER_WORK",
-                ExistingPeriodicWorkPolicy.KEEP,
-                reminderWorkRequest
-        );
 
-    }
 
 }

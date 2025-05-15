@@ -1,51 +1,131 @@
 package xyz.ziadboukhalkhal.shopsmart.data.repository;
 
-
-import android.app.Application;
 import androidx.lifecycle.LiveData;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.firestore.FirebaseFirestore;
+import com.google.firebase.firestore.QueryDocumentSnapshot;
+
+import java.util.Date;
 import java.util.List;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 import xyz.ziadboukhalkhal.shopsmart.data.local.dao.ShoppingListDao;
-import xyz.ziadboukhalkhal.shopsmart.data.local.database.ShoppingListDatabase;
 import xyz.ziadboukhalkhal.shopsmart.data.local.entity.ShoppingListItem;
 
 public class ShoppingListRepository {
-    private ShoppingListDao shoppingListDao;
-    private LiveData<List<ShoppingListItem>> allItems;
-    private LiveData<List<ShoppingListItem>> unpurchasedItems;
-    private ExecutorService executorService;
+    private final ShoppingListDao dao;
+    private final FirebaseFirestore firestore;
+    private final Executor executor;
+    private final String userId;
 
-    public ShoppingListRepository(Application application) {
-        ShoppingListDatabase database = ShoppingListDatabase.getInstance(application);
-        shoppingListDao = database.shoppingListDao();
-        allItems = shoppingListDao.getAllItems();
-        unpurchasedItems = shoppingListDao.getUnpurchasedItems();
-        executorService = Executors.newSingleThreadExecutor();
-    }
+    public ShoppingListRepository(ShoppingListDao dao) {
+        this.dao = dao;
+        this.firestore = FirebaseFirestore.getInstance();
+        this.executor = Executors.newSingleThreadExecutor();
+        this.userId = FirebaseAuth.getInstance().getCurrentUser().getUid();
 
-    public void insert(ShoppingListItem item) {
-        executorService.execute(() -> shoppingListDao.insert(item));
-    }
-
-    public void update(ShoppingListItem item) {
-        executorService.execute(() -> shoppingListDao.update(item));
-    }
-
-    public void delete(ShoppingListItem item) {
-        executorService.execute(() -> shoppingListDao.delete(item));
-    }
-
-    public void deleteAllItems() {
-        executorService.execute(shoppingListDao::deleteAllItems);
+        // Enable Firestore offline persistence
+        firestore.enableNetwork().addOnCompleteListener(task -> {
+            if (task.isSuccessful()) {
+                syncWithFirestore();
+            }
+        });
     }
 
     public LiveData<List<ShoppingListItem>> getAllItems() {
-        return allItems;
+        return dao.getAllItems(userId);
     }
 
-    public LiveData<List<ShoppingListItem>> getUnpurchasedItems() {
-        return unpurchasedItems;
+    public void addItem(ShoppingListItem item) {
+        executor.execute(() -> {
+            item.setUserId(userId);
+            item.setLocalTimestamp(new Date());
+            item.setSynced(false);
+            dao.insert(item);
+            syncItemWithFirestore(item);
+        });
+    }
+
+    public void updateItem(ShoppingListItem item) {
+        executor.execute(() -> {
+            item.setLocalTimestamp(new Date());
+            item.setSynced(false);
+            dao.update(item);
+            syncItemWithFirestore(item);
+        });
+    }
+
+    public void deleteItem(ShoppingListItem item) {
+        executor.execute(() -> {
+            dao.delete(item.getId());
+            deleteFromFirestore(item.getId());
+        });
+    }
+
+    private void syncWithFirestore() {
+        executor.execute(() -> {
+            // Push local changes to Firestore
+            List<ShoppingListItem> unsyncedItems = dao.getUnsyncedItems(userId);
+            for (ShoppingListItem item : unsyncedItems) {
+                syncItemWithFirestore(item);
+            }
+
+            // Pull changes from Firestore
+            firestore.collection("shoppingItems")
+                    .whereEqualTo("userId", userId)
+                    .addSnapshotListener((snapshots, error) -> {
+                        if (error != null || snapshots == null) return;
+
+                        executor.execute(() -> {
+                            List<ShoppingListItem> localItems = dao.getAllItemsSync(userId);
+                            for (QueryDocumentSnapshot doc : snapshots) {
+                                ShoppingListItem cloudItem = doc.toObject(ShoppingListItem.class);
+                                cloudItem.setId(doc.getId());
+                                cloudItem.setSynced(true);
+
+                                // Merge with local version if exists
+                                localItems.stream()
+                                        .filter(local -> local.getId().equals(cloudItem.getId()))
+                                        .findFirst()
+                                        .ifPresentOrElse(
+                                                local -> {
+                                                    local.mergeWithCloudVersion(cloudItem);
+                                                    dao.update(local);
+                                                },
+                                                () -> dao.insert(cloudItem)
+                                        );
+                            }
+                        });
+                    });
+        });
+    }
+
+    private void syncItemWithFirestore(ShoppingListItem item) {
+        if (item.getId() == null) {
+            // New item
+            firestore.collection("shoppingItems")
+                    .add(item.toMap())
+                    .addOnSuccessListener(ref -> {
+                        item.setId(ref.getId());
+                        item.setSynced(true);
+                        dao.update(item);
+                    });
+        } else {
+            // Existing item
+            firestore.collection("shoppingItems")
+                    .document(item.getId())
+                    .set(item.toMap())
+                    .addOnSuccessListener(aVoid -> {
+                        item.setSynced(true);
+                        dao.update(item);
+                    });
+        }
+    }
+
+    private void deleteFromFirestore(String id) {
+        firestore.collection("shoppingItems")
+                .document(id)
+                .delete();
     }
 }

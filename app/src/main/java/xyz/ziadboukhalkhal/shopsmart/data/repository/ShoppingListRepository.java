@@ -44,7 +44,7 @@ public class ShoppingListRepository {
     // Basic CRUD operations
     public void insert(ShoppingListItem item) {
         if (!item.isValid()) {
-            return;  // Don't insert invalid items
+            return;
         }
         item.setLastUpdated(System.currentTimeMillis());
         executorService.execute(() -> shoppingListDao.insert(item));

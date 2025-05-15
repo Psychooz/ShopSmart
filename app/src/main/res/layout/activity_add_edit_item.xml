@@ -5,7 +5,8 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="16dp"
-    tools:context=".ui.activities.AddEditItemActivity">
+    tools:context=".ui.activities.AddEditItemActivity"
+    android:id="@+id/add_edit_item_activity">
 
     <com.google.android.material.textfield.TextInputLayout
         android:id="@+id/textInputLayout_name"
